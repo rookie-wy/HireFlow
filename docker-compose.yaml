@@ -1,0 +1,40 @@
+version: '3.8'
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/recruitment
+      - REDIS_URL=redis://redis:6379/0
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8001
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+      - redis
+      - chroma
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: password
+      MYSQL_DATABASE: recruitment
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+  chroma:
+    image: chromadb/chroma:0.5.5
+    ports:
+      - "8001:8001"
+    volumes:
+      - chroma_data:/chroma/data
+volumes:
+  pgdata:
+  chroma_data:
