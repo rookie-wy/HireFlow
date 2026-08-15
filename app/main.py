@@ -1,3 +1,11 @@
+import sys
+from pathlib import Path
+
+# 将项目根目录（src）加入 sys.path：直接执行 `python app/main.py`（或 PyCharm 直接
+# 运行本脚本）时，sys.path[0] 是脚本所在目录 app/ 而非项目根，会导致 `import app` 失败。
+# `python -m uvicorn app.main:app` 不受影响（-m 模式自动把当前目录加入 sys.path）。
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends

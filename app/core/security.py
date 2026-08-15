@@ -1,9 +1,13 @@
 from datetime import datetime, timedelta, timezone
+
+import bcrypt
 from jose import jwt, JWTError
-from passlib.context import CryptContext
+
 from app.core.config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt 仅使用密码前 72 字节；bcrypt>=5.0 对超长输入抛 ValueError（旧版静默截断），
+# 故此处显式截断，避免 RegisterRequest 允许的 128 字符上限触发异常。
+_BCRYPT_MAX_BYTES = 72
 
 def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode = data.copy()
@@ -25,7 +29,15 @@ def decode_access_token(token: str):
         return None
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    pw = password.encode("utf-8")[:_BCRYPT_MAX_BYTES]
+    return bcrypt.hashpw(pw, bcrypt.gensalt()).decode("utf-8")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8")[:_BCRYPT_MAX_BYTES],
+            hashed_password.encode("utf-8"),
+        )
+    except (ValueError, TypeError):
+        # 哈希格式非法或密码字节异常时视为不匹配，而非抛 500
+        return False

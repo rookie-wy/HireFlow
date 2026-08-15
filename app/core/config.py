@@ -2,6 +2,7 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from typing import List, Dict
 import os
+from pathlib import Path
 class Settings(BaseSettings):
     HF_ENDPOINT: str = "https://hf-mirror.com"
     APP_ENV: str = "development"
@@ -41,7 +42,10 @@ class Settings(BaseSettings):
         return v
 
     class Config:
-        env_file = ".env"
+        # 用绝对路径定位 .env（src/.env），避免相对路径 ".env" 依赖当前工作目录：
+        # 命令行 `cd src` 运行时 cwd 恰好是 src 能命中，但 PyCharm 直接运行时 cwd 常为
+        # 项目根目录，相对路径找不到 .env 会导致 JWT_SECRET_KEY 等配置为空、启动崩溃。
+        env_file = str(Path(__file__).resolve().parents[2] / ".env")
 
 settings = Settings()
 # 全局生效
