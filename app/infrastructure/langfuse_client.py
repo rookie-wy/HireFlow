@@ -1,17 +1,26 @@
 import logging
-from langfuse import Langfuse
+
+try:
+    from langfuse import Langfuse
+    LANGFUSE_AVAILABLE = True
+except ImportError:  # langfuse 未安装（后置项），观测日志跳过
+    LANGFUSE_AVAILABLE = False
+
 from app.core.config import settings
 
 langfuse_client = None
 
+
 def init_langfuse():
     global langfuse_client
-    if langfuse_client is None and settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY:
+    if (langfuse_client is None and LANGFUSE_AVAILABLE
+            and settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY):
         langfuse_client = Langfuse(
             public_key=settings.LANGFUSE_PUBLIC_KEY,
             secret_key=settings.LANGFUSE_SECRET_KEY,
             host=settings.LANGFUSE_HOST
         )
+
 
 def log_llm_call(model: str, messages: list, response):
     init_langfuse()

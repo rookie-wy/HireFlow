@@ -1,12 +1,16 @@
-CREATE TABLE users (
+-- 数据库初始化脚本（幂等，可重复执行；init_pool 启动时自动执行）
+
+CREATE TABLE IF NOT EXISTS users (
     id CHAR(36) PRIMARY KEY,
     tenant_id VARCHAR(32) NOT NULL,
     username VARCHAR(100),
+    password_hash VARCHAR(255),
     role VARCHAR(20) NOT NULL CHECK (role IN ('hr','manager','admin')),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_users_username_tenant (tenant_id, username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE jobs (
+CREATE TABLE IF NOT EXISTS jobs (
     id CHAR(36) PRIMARY KEY,
     tenant_id VARCHAR(32) NOT NULL,
     title VARCHAR(255),
@@ -17,7 +21,7 @@ CREATE TABLE jobs (
     INDEX idx_jobs_tenant_id (tenant_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE candidates (
+CREATE TABLE IF NOT EXISTS candidates (
     id CHAR(36) PRIMARY KEY,
     tenant_id VARCHAR(32) NOT NULL,
     name VARCHAR(100),
@@ -31,7 +35,7 @@ CREATE TABLE candidates (
     UNIQUE INDEX idx_candidates_email_tenant (tenant_id, email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE match_results (
+CREATE TABLE IF NOT EXISTS match_results (
     id CHAR(36) PRIMARY KEY,
     tenant_id VARCHAR(32) NOT NULL,
     job_id CHAR(36) NOT NULL,
@@ -46,7 +50,7 @@ CREATE TABLE match_results (
     INDEX idx_match_tenant_job (tenant_id, job_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE interaction_log (
+CREATE TABLE IF NOT EXISTS interaction_log (
     id CHAR(36) PRIMARY KEY,
     tenant_id VARCHAR(32) NOT NULL,
     session_id VARCHAR(64),
@@ -59,7 +63,7 @@ CREATE TABLE interaction_log (
     INDEX idx_interaction_session (tenant_id, session_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
-CREATE TABLE cost_records (
+CREATE TABLE IF NOT EXISTS cost_records (
     id CHAR(36) PRIMARY KEY,
     tenant_id VARCHAR(32) NOT NULL,
     trace_id VARCHAR(64),

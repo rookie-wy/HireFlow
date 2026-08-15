@@ -1,3 +1,4 @@
+import os
 import pymysql
 from dbutils.pooled_db import PooledDB
 from contextlib import contextmanager
@@ -37,6 +38,8 @@ connection_pool = None
 
 def init_pool():
     global connection_pool
+    if connection_pool is not None:
+        return
     try:
         cfg = _parse_db_url()
         connection_pool = PooledDB(
@@ -47,10 +50,28 @@ def init_pool():
             blocking=True,
             **cfg
         )
+        _init_schema()
         logger.info("MySQL connection pool initialized")
     except Exception as e:
         logger.error(f"Failed to init MySQL pool: {e}")
         raise DatabaseException("Database initialization failed")
+
+def _init_schema():
+    """执行建表脚本（幂等，使用 IF NOT EXISTS）。"""
+    schema_path = os.path.join(os.path.dirname(__file__), "init_db.sql")
+    with open(schema_path, "r", encoding="utf-8") as f:
+        sql = f.read()
+    conn = connection_pool.connection()
+    try:
+        with conn.cursor() as cur:
+            for statement in sql.split(";"):
+                statement = statement.strip()
+                if statement:
+                    cur.execute(statement)
+        conn.commit()
+    finally:
+        conn.close()
+
 
 def get_connection():
     if connection_pool is None:
@@ -60,6 +81,13 @@ def get_connection():
 def release_connection(conn):
     if conn:
         conn.close()
+
+
+def close_pool():
+    global connection_pool
+    if connection_pool:
+        connection_pool.close()
+        connection_pool = None
 
 @contextmanager
 def get_db():

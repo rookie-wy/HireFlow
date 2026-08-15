@@ -9,3 +9,4 @@ class User:
     username: str
     role: str
     created_at: Optional[datetime] = None
+    password_hash: Optional[str] = None

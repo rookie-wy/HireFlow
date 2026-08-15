@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from app.api.deps import get_current_user
 from app.core.response import APIResponse, success
 from app.agents.graph import app as agent_app
+from app.core.limiter import limiter
 from pydantic import BaseModel, Field
 from typing import Optional
 import uuid
@@ -20,6 +21,7 @@ class ScreenRequest(BaseModel):
     session_id: Optional[str] = Field(default=None, description="会话ID，用于恢复流程")
 
 @router.post("/screen", response_model=APIResponse)
+@limiter.limit("5/minute")
 async def screen_candidates(req: ScreenRequest, request: Request, user=Depends(get_current_user)):
     tenant_id = request.state.tenant_id
     user_id = user.get("user_id")
@@ -44,7 +46,8 @@ async def screen_candidates(req: ScreenRequest, request: Request, user=Depends(g
         "feedback": None,
     }
 
-    config = {"configurable": {"thread_id": session_id, "tenant_id": tenant_id}}
+    # recursion_limit 限制图执行步数，防止死循环 / 失控超时
+    config = {"configurable": {"thread_id": session_id, "tenant_id": tenant_id}, "recursion_limit": 50}
     try:
         final_state = await agent_app.ainvoke(initial_state, config)
         results = final_state.get("fine_reports", [])
@@ -55,8 +58,8 @@ async def screen_candidates(req: ScreenRequest, request: Request, user=Depends(g
             "trace_id": trace_id
         })
     except Exception as e:
-        logger.error(f"Screen agent error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Agent execution failed: {str(e)}")
+        logger.exception(f"Screen agent error: {e}")
+        raise HTTPException(status_code=500, detail="Agent execution failed")
 from app.db.repositories.match_repository import MatchRepository
 
 @router.get("/match_results", response_model=APIResponse)

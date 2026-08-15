@@ -1,8 +1,11 @@
-from celery import shared_task
-from app.services.memory.session_memory import SessionMemory
+import logging
+from app.infrastructure.tasks._compat import shared_task_compat
 from app.services.memory.interaction_logger import InteractionLogger
 
-@shared_task
+logger = logging.getLogger(__name__)
+
+
+@shared_task_compat
 def persist_session_snapshot(session_id: str, state: dict):
     # 将当前状态以event_type='session_snapshot'写入interaction_log
     try:
@@ -17,7 +20,8 @@ def persist_session_snapshot(session_id: str, state: dict):
         # 重试或记录
         pass
 
-@shared_task
+
+@shared_task_compat
 def anonymize_old_logs():
     from app.db.session import get_db
     from datetime import timedelta, datetime

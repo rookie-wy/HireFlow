@@ -15,26 +15,10 @@ from app.core.exceptions import BusinessException
 
 logger = logging.getLogger(__name__)
 
-# 后备 PDF 文本提取（PyPDF2）
-def extract_text_pypdf(file_path: str) -> str:
-    try:
-        from PyPDF2 import PdfReader
-        reader = PdfReader(file_path)
-        text = ""
-        for page in reader.pages:
-            extracted = page.extract_text()
-            if extracted:
-                text += extracted + "\n"
-        return text.strip()
-    except ImportError:
-        logger.warning("PyPDF2 not installed, cannot fallback")
-    except Exception as e:
-        logger.error(f"PyPDF2 extraction failed: {e}")
-    return ""
 
 async def parse_resume_pipeline(file_path: str, file_type: str) -> str:
-    """双链路解析 + PyPDF2 后备，全部失败则返回空字符串"""
-    # 1. MinerU 优先
+    """pymupdf 优先 + OCR 后备，全部失败则返回空字符串"""
+    # 1. pymupdf 提取 PDF 文本
     try:
         text = mineru_parse(file_path)
         if text and len(text.strip()) > 50:
@@ -50,19 +34,13 @@ async def parse_resume_pipeline(file_path: str, file_type: str) -> str:
     except Exception as e:
         logger.warning(f"PaddleOCR failed: {e}")
 
-    # 3. PyPDF2 后备（仅 PDF）
-    if file_type.lower() in ['.pdf']:
-        text = extract_text_pypdf(file_path)
-        if text and len(text.strip()) > 20:
-            return text.strip()
-
     logger.error("All resume parsing methods failed")
     return ""
 
 @enforce_structured_output(CandidateProfile, max_retries=2)
 async def extract_candidate_profile(raw_text: str) -> str:
     """调用 LLM 提取结构化候选人信息，返回原始 JSON 字符串"""
-    scan_input(raw_text)
+    raw_text = scan_input(raw_text)
     truncated_text = raw_text[:3000]
     llm = LLMClient()
     prompt = f"""从以下简历文本提取候选人信息，返回紧凑JSON（无换行、无缩进），结构如下：
@@ -84,6 +62,9 @@ async def process_resume_upload(file_content: bytes, filename: str, tenant_id: s
         raw_text = await parse_resume_pipeline(tmp_path, suffix)
         if not raw_text:
             raise BusinessException("简历文件无法解析，请确认文件是否为可读的PDF或图片格式")
+
+        # PII 脱敏（身份证号），email/phone 因业务需要保留
+        raw_text = scan_input(raw_text)
 
         profile = await extract_candidate_profile(raw_text)
 

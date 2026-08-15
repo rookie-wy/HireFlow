@@ -13,7 +13,7 @@ class CostRepository(BaseRepository):
         """
         self._execute(query, (
             record.id,
-            self.tenant_id,
+            record.tenant_id or self.tenant_id,
             record.trace_id,
             record.model_name,
             record.tokens_prompt,

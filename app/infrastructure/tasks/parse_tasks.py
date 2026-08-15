@@ -1,12 +1,13 @@
-from celery import shared_task
+import logging
+from app.infrastructure.tasks._compat import shared_task_compat
 from app.services.parsing.resume_parser import process_resume_upload
 from app.db.repositories.candidate_repository import CandidateRepository
 from app.db.session import get_db
-import logging
 
 logger = logging.getLogger(__name__)
 
-@shared_task(name="parse_resume_task", queue="parse_resume")
+
+@shared_task_compat(name="parse_resume_task", queue="parse_resume")
 def parse_resume_task(candidate_id: str, file_content: bytes, filename: str, tenant_id: str):
     try:
         profile = process_resume_upload(file_content, filename, tenant_id)

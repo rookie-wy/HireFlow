@@ -2,22 +2,36 @@ import streamlit as st
 import requests
 import json
 import time
-from datetime import datetime, timedelta, timezone
-from jose import jwt
+from datetime import datetime
 
 # ---------- 配置 ----------
 BACKEND_URL = "http://localhost:8000/api/v1"
-JWT_SECRET_KEY = "change-me"
-JWT_ALGORITHM = "HS256"
 
-def generate_test_token():
-    payload = {
-        "user_id": "u123",
-        "tenant_id": "t123",
-        "role": "hr",
-        "exp": datetime.now(timezone.utc) + timedelta(days=365)
-    }
-    return jwt.encode(payload, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+def login(username: str, password: str, tenant_id: str):
+    """调用后端登录接口获取 JWT，失败返回 None。"""
+    try:
+        resp = requests.post(f"{BACKEND_URL}/auth/login", json={
+            "username": username, "password": password, "tenant_id": tenant_id
+        }, timeout=10)
+        if resp.status_code == 200:
+            return resp.json().get("data", {}).get("access_token")
+    except Exception:
+        pass
+    return None
+
+
+def register(username: str, password: str, tenant_id: str):
+    """调用后端注册接口，返回 (是否成功, 提示信息)。"""
+    try:
+        resp = requests.post(f"{BACKEND_URL}/auth/register", json={
+            "username": username, "password": password, "tenant_id": tenant_id
+        }, timeout=10)
+        if resp.status_code == 200:
+            return True, "注册成功"
+        return False, resp.text[:200]
+    except Exception as e:
+        return False, str(e)
 
 # ---------- 页面设置 ----------
 st.set_page_config(page_title="AI 招聘助手", layout="wide", initial_sidebar_state="expanded")
@@ -38,31 +52,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- 初始化会话状态 ----------
-def init_session():
-    defaults = {
-        "auth_token": generate_test_token(),
-        "session_id": None,
-        "job_id": None,
-        "jobs": [],
-        "candidates": [],
-        "screening_results": [],
-        "uploading": False,
-        "upload_count": 0,
-        "last_job_id": None
-    }
-    for k, v in defaults.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
-
-    if not st.session_state.jobs:
-        load_jobs_from_backend()
-    if st.session_state.job_id and not st.session_state.screening_results:
-        load_screening_results(st.session_state.job_id)
-    if not st.session_state.candidates:
-        load_candidates_from_backend()
-
-init_session()
 
 # ---------- 数据加载函数 ----------
 def load_candidates_from_backend():
@@ -119,6 +108,60 @@ def load_screening_results(job_id: str):
             st.session_state.screening_results = []
     except Exception:
         st.session_state.screening_results = []
+# ---------- 初始化会话状态 ----------
+def init_session():
+    defaults = {
+        "auth_token": None,
+        "session_id": None,
+        "job_id": None,
+        "jobs": [],
+        "candidates": [],
+        "screening_results": [],
+        "uploading": False,
+        "upload_count": 0,
+        "last_job_id": None
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+    if not st.session_state.jobs:
+        load_jobs_from_backend()
+    if st.session_state.job_id and not st.session_state.screening_results:
+        load_screening_results(st.session_state.job_id)
+    if not st.session_state.candidates:
+        load_candidates_from_backend()
+
+init_session()
+
+# ---------- 登录门禁 ----------
+if not st.session_state.auth_token:
+    st.title("🔐 登录 AI 招聘助手")
+    tab_login, tab_register = st.tabs(["登录", "注册"])
+    with tab_login:
+        with st.form("login_form"):
+            username = st.text_input("用户名")
+            password = st.text_input("密码", type="password")
+            tenant_id = st.text_input("租户 ID")
+            if st.form_submit_button("登录", use_container_width=True):
+                token = login(username, password, tenant_id)
+                if token:
+                    st.session_state.auth_token = token
+                    st.rerun()
+                else:
+                    st.error("登录失败，请检查用户名 / 密码 / 租户 ID")
+    with tab_register:
+        with st.form("register_form"):
+            r_username = st.text_input("用户名", key="reg_user")
+            r_password = st.text_input("密码（至少8位）", type="password", key="reg_pass")
+            r_tenant = st.text_input("租户 ID", key="reg_tenant")
+            if st.form_submit_button("注册", use_container_width=True):
+                ok, msg = register(r_username, r_password, r_tenant)
+                if ok:
+                    st.success("注册成功，请切换到「登录」标签登录")
+                else:
+                    st.error(f"注册失败：{msg}")
+    st.stop()
 
 # ---------- 工具函数 ----------
 def call_backend(endpoint, data=None, files=None, method="POST"):
@@ -186,7 +229,7 @@ if tab == "📤 简历上传":
     uploader_key = f"main_uploader_{st.session_state.upload_count}"
     uploaded_file = st.file_uploader(
         "拖拽文件到此处或点击浏览",
-        type=["pdf", "doc", "docx", "png", "jpg", "jpeg"],
+        type=["pdf", "png", "jpg", "jpeg"],
         key=uploader_key,
         disabled=st.session_state.uploading
     )

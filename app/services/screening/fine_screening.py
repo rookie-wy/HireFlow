@@ -35,7 +35,9 @@ class FineScreeningEngine:
         for cid in candidate_ids:
             jd_hash = hashlib.md5(json.dumps(jd_dict, sort_keys=True).encode()).hexdigest()
             cache_key = get_cache_key(jd_hash, cid)
-            cached = self.gpt_cache.get(cache_key)
+            cached = None
+            if self.gpt_cache is not None:
+                cached = self.gpt_cache.get(cache_key)
             if cached:
                 logger.info(f"Cache hit for candidate {cid}")
                 reports.append(OverallReport.parse_raw(cached))
@@ -66,7 +68,8 @@ class FineScreeningEngine:
                 agent_details=agent_results
             )
 
-            self.gpt_cache.put(cache_key, report.json())
+            if self.gpt_cache is not None:
+                self.gpt_cache.put(cache_key, report.json())
 
             with get_db() as conn:
                 match_repo = MatchRepository(conn)

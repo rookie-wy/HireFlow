@@ -11,7 +11,7 @@ def test_reciprocal_rank_fusion():
 
 @pytest.mark.asyncio
 async def test_hyde_query_rewrite(mock_llm_client):
-    mock_llm_client.completion.return_value = MagicMock(
+    mock_llm_client.return_value = MagicMock(
         choices=[MagicMock(message=MagicMock(content="理想候选人简历片段..."))]
     )
     result = await hyde_query_rewrite("3年SaaS销售")

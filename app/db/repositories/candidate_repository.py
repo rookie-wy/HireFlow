@@ -32,7 +32,7 @@ class CandidateRepository(BaseRepository):
                 json.dumps(candidate.structured_json, default=str) if candidate.structured_json else None,
                 candidate.embedding_id,
                 existing.id,
-                self.tenant_id
+                candidate.tenant_id or self.tenant_id
             ))
             return existing.id
         else:
@@ -43,7 +43,7 @@ class CandidateRepository(BaseRepository):
             """
             self._execute(query, (
                 candidate.id,
-                self.tenant_id,
+                candidate.tenant_id or self.tenant_id,
                 candidate.name,
                 candidate.email,
                 candidate.phone,

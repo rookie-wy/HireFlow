@@ -5,12 +5,29 @@ from app.db.session import get_db
 from app.services.parsing.resume_parser import process_resume_upload
 from app.core.response import APIResponse, success
 from app.core.config import settings
+from app.core.limiter import limiter
 import os
 router = APIRouter()
 
-ALLOWED_EXTENSIONS = {".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg"}
+ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
+
+# 魔数（文件签名）校验，防止伪造扩展名绕过白名单
+_MAGIC_SIGNATURES = {
+    ".pdf": b"%PDF",
+    ".png": b"\x89PNG\r\n\x1a\n",
+    ".jpg": b"\xff\xd8\xff",
+    ".jpeg": b"\xff\xd8\xff",
+}
+
+
+def _verify_file_signature(content: bytes, ext: str) -> bool:
+    magic = _MAGIC_SIGNATURES.get(ext)
+    if magic is None:
+        return False
+    return content[: len(magic)] == magic
 
 @router.post("/candidates/upload", response_model=APIResponse)
+@limiter.limit("20/minute")
 async def upload_resume(
     file: UploadFile = File(...),
     request: Request = None,
@@ -24,6 +41,9 @@ async def upload_resume(
     content = await file.read()
     if len(content) > settings.MAX_UPLOAD_SIZE:
         raise HTTPException(status_code=413, detail="File too large")
+    # 内容签名校验（防止伪造扩展名绕过白名单）
+    if not _verify_file_signature(content, ext):
+        raise HTTPException(status_code=400, detail="File content does not match extension")
     tenant_id = request.state.tenant_id
     profile = await process_resume_upload(content, file.filename, tenant_id)
     return success(data={"candidate_id": profile.email, "profile": profile.model_dump()})
@@ -46,7 +66,6 @@ async def list_candidates(request: Request, user=Depends(get_current_user)):
             })
         return success(data=data)
 
-from fastapi import HTTPException
 @router.delete("/candidates/{candidate_id}", response_model=APIResponse)
 async def delete_candidate(candidate_id: str, request: Request, user=Depends(get_current_user)):
     tenant_id = request.state.tenant_id

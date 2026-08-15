@@ -16,7 +16,7 @@ async def parse_jd(jd_text: str) -> JobDescription:
     if not jd_text or not jd_text.strip():
         raise BusinessException("JD text cannot be empty")
 
-    scan_input(jd_text)  # 安全扫描
+    jd_text = scan_input(jd_text)  # 安全处理（PII 脱敏）
 
     llm = LLMClient()
     prompt = f"""从以下职位描述中提取信息，返回严格JSON格式，不要包含任何额外说明。JSON字段如下：

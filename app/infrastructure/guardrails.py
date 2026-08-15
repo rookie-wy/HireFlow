@@ -1,49 +1,34 @@
+"""输入/输出安全防护：PII 脱敏。
+
+guardrails-ai（第三方毒性检测模型）已从依赖移除，改用轻量 PII 脱敏：
+- 进入 LLM 的输入：身份证号脱敏（非业务必需），email/phone 保留（候选人去重/联系需要）。
+- LLM 输出：全文脱敏（输出不应含任何 PII）。
+
+企业如需更强的内容安全（毒性/越权检测），可重新启用 guardrails-ai 并在此接入。
+"""
 import logging
-from app.core.exceptions import SecurityException
+from app.core.config import settings
+from app.utils.pii_utils import mask_pii, mask_id_card
 
 logger = logging.getLogger(__name__)
 
-import logging
 
-logger = logging.getLogger(__name__)
+def scan_input(text: str) -> str:
+    """对进入 LLM 的输入做安全处理，返回脱敏后的文本。"""
+    if not text:
+        return text
+    if not settings.ENABLE_PII_MASKING:
+        return text
+    masked = mask_id_card(text)
+    if masked != text:
+        logger.warning("输入含身份证号，已脱敏")
+    return masked
 
-# 暂时禁用 Guardrails，避免模型加载和解析异常
-def scan_input(text: str) -> bool:
-    # TODO: 生产环境启用 Guardrails ToxicLanguage 检测
-    return True
 
-def scan_output(text: str) -> bool:
-    # TODO: 生产环境启用 Guardrails ToxicLanguage 检测
-    return True
-
-# # 尝试初始化有毒语言检测，失败则置为 None
-# try:
-#     _input_guard = Guard().use(ToxicLanguage(on_fail="exception"))
-#     _output_guard = Guard().use(ToxicLanguage(on_fail="exception"))
-#     _toxicity_enabled = True
-#     logger.info("ToxicLanguage guard initialized successfully")
-# except Exception as e:
-#     logger.warning(f"ToxicLanguage guard initialization failed, toxicity scanning disabled: {e}")
-#     _input_guard = None
-#     _output_guard = None
-#     _toxicity_enabled = False
-#
-# def scan_input(text: str) -> bool:
-#     if not _toxicity_enabled or _input_guard is None:
-#         return True  # 跳过检测
-#     try:
-#         _input_guard.validate(text)
-#         return True
-#     except Exception as e:
-#         logger.warning(f"Input security violation: {str(e)}")
-#         raise SecurityException(f"输入包含不当内容: {str(e)}")
-#
-# def scan_output(text: str) -> bool:
-#     if not _toxicity_enabled or _output_guard is None:
-#         return True
-#     try:
-#         _output_guard.validate(text)
-#         return True
-#     except Exception as e:
-#         logger.warning(f"Output security violation: {str(e)}")
-#         raise SecurityException(f"输出包含不当内容: {str(e)}")
+def scan_output(text: str) -> str:
+    """对 LLM 输出做安全处理，返回脱敏后的文本。"""
+    if not text:
+        return text
+    if not settings.ENABLE_PII_MASKING:
+        return text
+    return mask_pii(text)

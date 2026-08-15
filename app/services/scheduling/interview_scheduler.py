@@ -32,8 +32,8 @@ class InterviewScheduler:
         messages = [{"role": "user", "content": prompt}]
         resp = llm.completion(messages)
         draft = json.loads(resp.choices[0].message.content)
-        # 安全扫描
-        scan_output(draft['body'])
+        # 安全处理（输出脱敏）
+        draft['body'] = scan_output(draft['body'])
         return {
             "candidate_email": candidate_email,
             "subject": draft['subject'],

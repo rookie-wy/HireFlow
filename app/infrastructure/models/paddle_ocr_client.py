@@ -5,7 +5,8 @@ except ImportError:
     PaddleOCR = None
 
 logger = logging.getLogger(__name__)
-_ocr_instance = PaddleOCR(use_angle_cls=True, lang='ch')
+_ocr_instance = None  # 惰性初始化，避免 PaddleOCR 未安装时模块加载崩溃
+
 
 def get_ocr():
     global _ocr_instance
@@ -17,6 +18,7 @@ def get_ocr():
             logger.error(f"PaddleOCR init failed: {e}")
             _ocr_instance = None
     return _ocr_instance
+
 
 def parse_image(image_path: str) -> str:
     ocr = get_ocr()

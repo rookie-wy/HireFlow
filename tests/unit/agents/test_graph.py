@@ -1,23 +1,39 @@
 import pytest
 from app.agents.graph import app
+from app.models.schemas.job_schema import JobDescription
+from app.models.domain.job import Job
+from app.models.schemas.agent_schemas import OverallReport
 from unittest.mock import patch, AsyncMock
+
 
 @pytest.mark.asyncio
 async def test_full_flow():
-    # 构建初始状态并运行图，由于涉及大量外部调用，需要mock多个服务
-    with patch('app.agents.nodes.parse_jd.parse_jd', new_callable=AsyncMock) as mock_parse, \
-         patch('app.agents.nodes.rough_screening.rough_screening_node', new_callable=AsyncMock) as mock_rough, \
-         patch('app.agents.nodes.fine_screening.fine_screening_node', new_callable=AsyncMock) as mock_fine, \
-         patch('app.agents.nodes.schedule.schedule_node', new_callable=AsyncMock) as mock_sched, \
-         patch('app.agents.nodes.feedback.feedback_node', new_callable=AsyncMock) as mock_fb:
-        mock_parse.return_value = {"job_id": "j1", "parsed_jd": {}}
-        mock_rough.return_value = {"candidate_ids": ["c1"], "rough_results": [{}]}
-        mock_fine.return_value = {"fine_reports": [{"candidate_id": "c1", "overall_score": 85}]}
-        mock_sched.return_value = {"interview_draft": {}}
-        mock_fb.return_value = {}
+    # graph 在 import 时已用 add_node 绑定节点函数引用，patch 节点函数本身无效，
+    # 因此需 patch 各节点内部依赖的底层服务，让原始节点函数走通。
+    mock_jd = JobDescription(
+        title="Engineer", hard_requirements=["Python"], soft_requirements=[],
+        skill_graph=["FastAPI"], job_category="tech",
+    )
+    mock_job = Job(id="j1", tenant_id="t1", title="Engineer", jd_text="JD",
+                   jd_json={"title": "Engineer"}, job_category="tech")
+    mock_report = OverallReport(
+        candidate_id="c1", overall_score=85, dimension_scores={},
+        recommendation_text="ok", evidence=[], agent_details={},
+    )
 
-        initial = {"tenant_id": "t1", "user_id": "u1", "session_id": "s1", "trace_id": "tr1",
-                   "job_text": "JD", "messages": [], "current_step": "start"}
+    with patch('app.agents.nodes.parse_jd.parse_jd', new_callable=AsyncMock, return_value=mock_jd), \
+         patch('app.agents.nodes.parse_jd.save_job_to_db', return_value=mock_job), \
+         patch('app.agents.nodes.rough_screening.HybridScreener.screen', new_callable=AsyncMock,
+               return_value={"results": [{"candidate_id": "c1"}]}), \
+         patch('app.agents.nodes.fine_screening.FineScreeningEngine.screen_candidates',
+               new_callable=AsyncMock, return_value=[mock_report]):
+        initial = {
+            "tenant_id": "t1", "user_id": "u1", "session_id": "s1", "trace_id": "tr1",
+            "job_id": None, "job_text": "JD", "parsed_jd": None,
+            "messages": [], "candidate_ids": [], "rough_results": [], "fine_reports": [],
+            "interview_draft": None, "interview_confirmed": False, "feedback": None,
+            "current_step": "start",
+        }
         config = {"configurable": {"thread_id": "s1"}}
         final = await app.ainvoke(initial, config)
         assert "fine_reports" in final

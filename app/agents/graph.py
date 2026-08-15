@@ -43,5 +43,8 @@ builder.add_conditional_edges("schedule", after_schedule)
 builder.add_edge("handle_feedback", END)  # 反馈后结束
 
 # 编译
+# 注意：MemorySaver 为单进程内存态 checkpoint，进程重启后会话历史丢失。
+# 企业多副本/长期运行应替换为 SqliteSaver / RedisSaver（需额外安装
+# langgraph-checkpoint-sqlite / langgraph-checkpoint-redis 包），此处保持内存实现。
 memory = MemorySaver()
 app = builder.compile(checkpointer=memory, interrupt_before=["schedule"])

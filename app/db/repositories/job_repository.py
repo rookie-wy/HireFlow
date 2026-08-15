@@ -14,7 +14,7 @@ class JobRepository(BaseRepository):
         """
         self._execute(query, (
             job.id,
-            self.tenant_id,
+            job.tenant_id or self.tenant_id,
             job.title,
             job.jd_text,
             json.dumps(job.jd_json,default=str) if job.jd_json else None,

@@ -5,10 +5,12 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://postgres:postgres@db:5432/recruitment
+      - DATABASE_URL=mysql+pymysql://root:password@db:3306/recruitment?charset=utf8mb4
       - REDIS_URL=redis://redis:6379/0
       - CHROMA_HOST=chroma
       - CHROMA_PORT=8001
+      # 生产环境请用环境变量注入强随机密钥，勿用此占位值
+      - JWT_SECRET_KEY=please-change-me-in-production
     volumes:
       - .:/app
     depends_on:
@@ -36,5 +38,5 @@ services:
     volumes:
       - chroma_data:/chroma/data
 volumes:
-  pgdata:
+  mysql_data:
   chroma_data:
