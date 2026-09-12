@@ -1,0 +1,31 @@
+[project]
+name = "recruitment-agent"
+version = "5.0.0"
+description = "AI招聘Agent系统 — AI能力服务（解析/检索/多Agent圆桌讨论）"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.8.2",
+    "pydantic-settings>=2.4.0",
+    "python-multipart>=0.0.9",
+    "openai>=1.60.0",
+    "json-repair>=0.30.0",
+    "redis>=5.0.8",
+    "chromadb>=0.5.5",
+    "pymupdf>=1.24.14",
+    "rank-bm25>=0.2.2",
+    "numpy>=1.26.0",
+    "sentence-transformers>=3.0.0",
+    "FlagEmbedding>=1.2.10",
+    "aiohttp>=3.9.0",
+    "tenacity>=8.5.0",
+]
+
+[project.optional-dependencies]
+ocr = ["paddleocr>=3.0.0"]
+
+[[tool.uv.index]]
+url = "https://repo.huaweicloud.com/repository/pypi/simple"
+default = true
+trusted-host = "repo.huaweicloud.com"

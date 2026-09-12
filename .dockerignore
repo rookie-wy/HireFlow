@@ -1,0 +1,45 @@
+# =============================================================================
+# 构建上下文裁剪（配合 frontend/Dockerfile 使用根目录上下文）
+# 目的：避免把 6.5GB 本地模型、虚拟环境、node_modules、日志塞进构建缓存/镜像。
+# =============================================================================
+
+# 依赖与虚拟环境
+**/.venv/
+**/node_modules/
+**/__pycache__/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+
+# 本地模型权重（运行期用卷挂载，绝不进镜像）
+agent/models/
+
+# 构建产物（镜像内会重新构建）
+frontend/dist/
+backend/server
+backend/server.exe
+
+# 运行时数据与日志
+logs-*.log
+tmp/
+*.log
+
+# 版本控制与 IDE
+.git/
+.gitignore
+.idea/
+.vscode/
+
+# 环境变量文件（**注意**：.env 不排除，frontend 的 vite build 不读它，
+# 但 backend/agent 的镜像构建也不需要它；真正的密钥只在运行期注入。
+# 这里显式排除，避免误 COPY 进镜像中间层。）
+.env
+backend/.env
+agent/.env
+
+# 文档与测试样例（不影响镜像运行）
+docs/
+resume_*.pdf
+findings.md
+progress.md
+task_plan.md

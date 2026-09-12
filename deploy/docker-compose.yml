@@ -1,0 +1,256 @@
+# =============================================================================
+# AI 招聘 Agent 系统 — 开发/单机部署编排（Docker Compose Spec，需 Compose v2.20+）
+#
+# 六个服务：
+#   mysql(8.0)  redis(7-alpine)  chroma(1.0.15)  backend(Go)  agent(Python)  frontend(nginx)
+#
+# 启动：
+#   cp .env.example .env      # 首次，务必修改里面所有密码/密钥
+#   docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
+#   docker compose --env-file .env -f deploy/docker-compose.yml ps
+#
+# 关键约定（勿随手改）：
+#   * chroma 镜像必须是 chromadb/chroma:1.0.15 —— Python 客户端 chromadb 1.5.x
+#     与 0.5.x 服务端 API 不兼容；版本错配的典型现象是 heartbeat/collection 调用 404 或 500。
+#   * agent 容器内连 Chroma 用 CHROMA_HOST=chroma + CHROMA_PORT=8000（容器默认端口 8000，
+#     与宿主开发环境的 18001 不是一回事）。
+#   * backend 连依赖一律用服务名：mysql:3306 / redis:6379 / http://agent:8001。
+#   * 本地模型不进镜像：通过 AGENT_MODELS_DIR（默认 ../agent/models）只读 bind mount 到
+#     /app/models，agent 会自动优先加载本地权重，规避 HuggingFace 镜像 403。
+#   * 所有敏感变量来自仓库根目录 .env（env_file + ${VAR:?} 双重保障）：
+#     缺失时 compose 直接报错退出，不会带着空密钥把服务拉起来。
+#
+# 端口（宿主映射，便于直连调试；改端口只需改 .env 里的 *_PORT）：
+#   frontend 3000 → 容器 80      backend 8080    agent 8001
+#   mysql 13306 → 容器 3306（宿主 3306 常被本机 MySQL 占用，故用 13306）
+#   chroma 18001 → 容器 8000     redis 6379
+# =============================================================================
+
+name: ai-recruitment
+
+services:
+  # ---------------------------------------------------------------- MySQL 8.0
+  mysql:
+    image: mysql:8.0
+    container_name: ai-recruit-mysql
+    restart: unless-stopped
+    # 表结构由 backend 启动时的内嵌迁移自动创建（users/jobs/candidates/
+    # match_results/interaction_log/cost_records/screening_tasks 共 7 张表），
+    # 因此不需要 initdb 脚本目录。
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    environment:
+      # 密码与 backend 的 DATABASE_URL 必须一致：.env.example 里两者用同一个字面值，
+      # 改密码时请同时改 MYSQL_ROOT_PASSWORD 和 DATABASE_URL。
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在根目录 .env 中设置 MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-recruitment}
+      TZ: Asia/Shanghai
+    ports:
+      - "${MYSQL_PORT:-13306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      # 用 root 密码 ping；命中 healthy 后 backend 才会启动
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    networks: [ai-net]
+
+  # ------------------------------------------------------------- Redis 7-alpine
+  redis:
+    image: redis:7-alpine
+    container_name: ai-recruit-redis
+    restart: unless-stopped
+    # 限流计数器 + 筛选任务进度/SSE 事件通道都落在 Redis 上；
+    # 开启 AOF 让重启后仍有数据（限流窗口丢失、事件通道丢失都不致命，但便于排查）。
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    networks: [ai-net]
+
+  # ------------------------------------------------- ChromaDB（版本必须锁 1.0.15）
+  chroma:
+    image: chromadb/chroma:1.0.15
+    container_name: ai-recruit-chroma
+    restart: unless-stopped
+    environment:
+      IS_PERSISTENT: "TRUE"
+      PERSIST_DIRECTORY: /data
+      ANONYMIZED_TELEMETRY: "FALSE"
+    ports:
+      # 宿主 18001 → 容器 8000（agent 容器内用 CHROMA_PORT=8000 直连）
+      - "${CHROMA_PORT:-18001}:8000"
+    volumes:
+      - chroma_data:/data
+    healthcheck:
+      # 镜像基于 python-slim，没有 curl/wget，用 bash 的 /dev/tcp 探测 8000 端口。
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+      test:
+        [
+          "CMD-SHELL",
+          'bash -c "exec 3<>/dev/tcp/127.0.0.1/8000" || exit 1',
+        ]
+    networks: [ai-net]
+
+  # ------------------------------------------------- backend（Go / Gin 业务中台）
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    image: ai-recruitment/backend:latest
+    container_name: ai-recruit-backend
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      # 容器内一定是 production：密钥缺失时进程 fail-fast（这是期望行为，别改成 development 绕过）
+      APP_ENV: ${APP_ENV:-production}
+      HTTP_PORT: "8080"
+      # 容器内网络：服务名直连
+      # 注意：这里一律用引号包裹 —— DSN/URL 里的 `:` `?` `&` 在 YAML 里是易错字符，
+      # 不加引号时某些解析器会把 `? ` / `: ` 当成映射或复杂键的开始。
+      DATABASE_URL: "root:${MYSQL_ROOT_PASSWORD:?请在根目录 .env 中设置 MYSQL_ROOT_PASSWORD}@tcp(mysql:3306)/${MYSQL_DATABASE:-recruitment}?charset=utf8mb4&parseTime=True&loc=Local"
+      REDIS_URL: "redis://redis:6379/0"
+      AGENT_BASE_URL: "http://agent:8001"
+      # 与 agent 必须一致，否则 agent 侧 X-Internal-Key 校验返回 401
+      AGENT_INTERNAL_KEY: ${AGENT_INTERNAL_KEY:?请在根目录 .env 中设置 AGENT_INTERNAL_KEY}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?请在根目录 .env 中设置 JWT_SECRET_KEY}
+      JWT_ISSUER: ${JWT_ISSUER:-ai-recruitment-backend}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-60}
+      # 浏览器同源经 nginx 反代访问，默认无需 CORS；此处白名单供直连 8080 调试用
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      RATE_LIMIT_GLOBAL_PER_MIN: ${RATE_LIMIT_GLOBAL_PER_MIN:-100}
+      RATE_LIMIT_LOGIN_PER_MIN: ${RATE_LIMIT_LOGIN_PER_MIN:-10}
+      RATE_LIMIT_UPLOAD_PER_MIN: ${RATE_LIMIT_UPLOAD_PER_MIN:-20}
+      RATE_LIMIT_SCREEN_PER_MIN: ${RATE_LIMIT_SCREEN_PER_MIN:-5}
+      UPLOAD_MAX_MB: ${UPLOAD_MAX_MB:-10}
+      SCREEN_WORKER_COUNT: ${SCREEN_WORKER_COUNT:-4}
+      SCREEN_QUEUE_SIZE: ${SCREEN_QUEUE_SIZE:-64}
+      SCREEN_TASK_TIMEOUT_SEC: ${SCREEN_TASK_TIMEOUT_SEC:-300}
+      TZ: Asia/Shanghai
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [ai-net]
+
+  # ------------------------------------------------- agent（Python / FastAPI AI 服务）
+  agent:
+    build:
+      context: ../agent
+      dockerfile: Dockerfile
+    image: ai-recruitment/agent:latest
+    container_name: ai-recruit-agent
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      # DeepSeek（OpenAI 兼容）——生产环境缺失会 fail-fast
+      LLM_API_KEY: ${LLM_API_KEY:?请在根目录 .env 中设置 LLM_API_KEY（DeepSeek key）}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://api.deepseek.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      AGENT_INTERNAL_KEY: ${AGENT_INTERNAL_KEY:?请在根目录 .env 中设置 AGENT_INTERNAL_KEY}
+      # 容器内 Chroma：服务名 + 8000 端口
+      CHROMA_HOST: "chroma"
+      CHROMA_PORT: "8000"
+      # 本地模型优先（app/core/config.py 会自动探测 /app/models 下两个目录）
+      EMBEDDING_MODEL_PATH: "${EMBEDDING_MODEL_PATH:-/app/models/bge-m3}"
+      RERANKER_MODEL_PATH: "${RERANKER_MODEL_PATH:-/app/models/bge-reranker-v2-m3}"
+      # 国内 HF 镜像兜底（有本地权重时不会触发下载）
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://hf-mirror.com}"
+      # 缓存必须放在可写路径：/app/models 是 :ro 只读挂载，写不进去
+      HF_HOME: "/app/model_cache"
+      # mock MCP 面试工具：默认在本机运行，故用 host.docker.internal 回连宿主
+      # （9000 邮件 / 9001 日历；Linux 下由下面的 extra_hosts 提供该域名解析）
+      MCP_EMAIL_URL: "${MCP_EMAIL_URL:-http://host.docker.internal:9000}"
+      MCP_CALENDAR_URL: "${MCP_CALENDAR_URL:-http://host.docker.internal:9001}"
+      TZ: Asia/Shanghai
+    ports:
+      - "${AGENT_PORT:-8001}:8001"
+    volumes:
+      # 本地模型只读挂载：默认 ../agent/models（约 6.5GB，绝不 COPY 进镜像）。
+      # 换机器/换路径时在 .env 里改 AGENT_MODELS_DIR=/abs/path/to/models。
+      # 具名卷 model_cache 承接 HF 下载缓存（HF_HOME=/app/model_cache），
+      # 与只读的 /app/models 分开，避免"只读文件系统写缓存"报错。
+      - ${AGENT_MODELS_DIR:-../agent/models}:/app/models:ro
+      - model_cache:/app/model_cache
+    depends_on:
+      chroma:
+        condition: service_healthy
+    extra_hosts:
+      # 让 host.docker.internal 在 Linux 上也可解析（Docker Desktop 自带，Linux 引擎没有）
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8001/healthz || exit 1"]
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      # 首次加载 BGE-M3 + Reranker 权重较慢（CPU 上可能 1~3 分钟），与 Dockerfile 的 start-period 对齐
+      start_period: 180s
+    networks: [ai-net]
+
+  # ------------------------------------------------- frontend（nginx 托管 + /api 反代）
+  frontend:
+    build:
+      # 上下文必须是仓库根目录：Dockerfile 里要 COPY deploy/nginx.conf
+      context: ..
+      dockerfile: frontend/Dockerfile
+    image: ai-recruitment/frontend:latest
+    container_name: ai-recruit-frontend
+    restart: unless-stopped
+    ports:
+      # 宿主 3000 → 容器 80：与开发环境 Vite dev 的 3000 保持一致，前端地址不用改。
+      # 若 3000 被占用：改 .env 里 FRONTEND_PORT，或改成 "80:80" 直接用 80 端口。
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks: [ai-net]
+
+volumes:
+  mysql_data:
+  redis_data:
+  chroma_data:
+  # agent 的 HF 缓存卷（本地权重走 bind mount，不用这个卷）
+  model_cache:
+
+networks:
+  ai-net:
+    driver: bridge
