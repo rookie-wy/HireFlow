@@ -115,6 +115,8 @@ PythonProject2/
 │   ├── nginx.conf               #   前端站点配置（SPA 回退 + /api 反代 + SSE 不缓冲）
 │   └── RUNBOOK.md               #   运维手册（端口表/启停/排障/备份）
 ├── .env.example                 # 环境变量模板（含中文注释与安全提示）
+├── .gitignore                   # 忽略规则：.env / 模型 / 依赖 / 日志 / 临时脚本
+│                                #   （旧单体 src/ 也已排除，见下）
 ├── .dockerignore                # 构建上下文裁剪（排除模型/venv/node_modules）
 ├── pyproject.toml / uv.lock     # 根级 uv 工程（Phase 早期脚本用）
 ├── progress.md                  # 进度日志 + 「落地级优化」总表与各项实测数据
@@ -559,7 +561,52 @@ Prometheus 加两个 static_configs 即可抓取。建议优先告警的四条�
 
 ---
 
-## 十一、相关文档
+## 十一、仓库与推送
+
+- 远端仓库：**https://github.com/rookie-wy/HireFlow**（默认分支 `main`）
+- 仓库根 = 本目录（三服务架构），**旧单体 `src/` 不纳入仓库**（已加 `/src/` 到 `.gitignore`；
+  旧实现可从远端 `src/` 时代的提交或本地备份取回）
+
+### 首次克隆
+
+```bash
+git clone https://github.com/rookie-wy/HireFlow.git
+cd HireFlow
+# 依赖与密钥都不在仓库里，克隆后必须自建：
+cp .env.example .env                 # 填 MYSQL_ROOT_PASSWORD / AGENT_INTERNAL_KEY / JWT_SECRET_KEY / LLM_API_KEY
+cp .env backend/.env                 # 本机开发用：把 mysql/redis/chroma 地址改成 localhost:13306 / :6379 / :18001
+cp .env agent/.env                   # 至少要有 LLM_API_KEY / CHROMA_PORT=18001 / AGENT_INTERNAL_KEY
+# 模型权重需另外获取（6.5GB，未入库）：放到 agent/models/bge-m3 与 agent/models/bge-reranker-v2-m3
+```
+
+### 提交与推送（⚠️ 环境要点）
+
+```bash
+# 在 WSL 里 git 连不上 github.com（本机实测 443 被拦），请用 **Windows 侧 git**：
+"/mnt/f/Git/cmd/git.exe" -C "D:/PythonProject/PythonProject2" status
+"/mnt/f/Git/cmd/git.exe" -C "D:/PythonProject/PythonProject2" add -A
+"/mnt/f/Git/cmd/git.exe" -C "D:/PythonProject/PythonProject2" commit -m "feat: ..."
+"/mnt/f/Git/cmd/git.exe" -C "D:/PythonProject/PythonProject2" push origin main
+```
+
+### 提交前自查（防止泄露隐私）
+
+```bash
+# 1) 确认没有 .env / 密钥 / 模型 / 依赖被暂存
+git diff --cached --name-only | grep -E '\.env$|\.key$|\.pem$|\.log$|node_modules|\.venv|agent/models' && echo '⚠️ 需要处理'
+# 2) 确认暂存内容没有真实 key 或本机绝对路径
+git grep -InE 'sk-[A-Za-z0-9]{20,}|D:\\\\PythonProject|/mnt/d/PythonProject' --cached && echo '⚠️ 需要处理'
+# 3) 看最终文件清单
+git diff --cached --name-only | wc -l
+```
+
+> `.gitignore` 已覆盖：`.env` 与所有 `.env.*`（保留 `.env.example`）、`agent/models/`、
+> `node_modules/`、`.venv/`、`frontend/dist/`、`*.log`、`tmp/`、简历样本 `resume_*.pdf`、`.idea/` 等；
+> 若新增了含密钥的文件，请同步更新 `.gitignore` 再提交。
+
+---
+
+## 十二、相关文档
 
 - [`deploy/RUNBOOK.md`](deploy/RUNBOOK.md) — 运维手册：端口表、启停重建、日志、故障排查、备份与卷清理
 - [`progress.md`](progress.md) — 进度日志与「落地级优化」总表（每项含实测数据、设计理由、验证方式）
