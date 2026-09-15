@@ -414,8 +414,6 @@ cd agent && .venv/Scripts/python.exe -m pytest tests/ -q
 cd frontend && npm run build
 ```
 
-当前基线（2026-09-12）：**Go 6 个包全过、agent 34 项全过**。其中新增的"钉死不变量"类测试值得注意：
-
 | 测试 | 防的是什么 |
 |---|---|
 | `agent/tests/test_hard_filter.py` | 技能词边界（`Java` 不得命中 `JavaScript`）、年限不硬编码年份 |
@@ -426,9 +424,6 @@ cd frontend && npm run build
 | `backend/internal/repository/candidate_paging_test.go` | 真实 MySQL 集成：分页无重复无遗漏、`LoadForScreening` 不再截断到 200（库不可达时自动 skip） |
 
 ### 端到端与专项验证脚本（真实 LLM + 真实向量库）
-
-`tmp/` 下的脚本**必须在 Windows 侧用 agent 的 venv 解释器执行**（WSL 访问不到 Windows
-进程绑在 127.0.0.1 的端口）：
 
 ```bash
 # ① 全链路：登录 → 建岗(LLM 解析) → 传 3 份简历 → 筛选(SSE 事件透传断言) →
@@ -561,12 +556,6 @@ Prometheus 加两个 static_configs 即可抓取。建议优先告警的四条�
 
 ---
 
-## 十一、仓库与推送
-
-- 远端仓库：**https://github.com/rookie-wy/HireFlow**（默认分支 `main`）
-- 仓库根 = 本目录（三服务架构），**旧单体 `src/` 不纳入仓库**（已加 `/src/` 到 `.gitignore`；
-  旧实现可从远端 `src/` 时代的提交或本地备份取回）
-
 ### 首次克隆
 
 ```bash
@@ -579,34 +568,8 @@ cp .env agent/.env                   # 至少要有 LLM_API_KEY / CHROMA_PORT=18
 # 模型权重需另外获取（6.5GB，未入库）：放到 agent/models/bge-m3 与 agent/models/bge-reranker-v2-m3
 ```
 
-### 提交与推送（⚠️ 环境要点）
 
-```bash
-# 在 WSL 里 git 连不上 github.com（本机实测 443 被拦），请用 **Windows 侧 git**：
-"/mnt/f/Git/cmd/git.exe" -C "D:/PythonProject/PythonProject2" status
-"/mnt/f/Git/cmd/git.exe" -C "D:/PythonProject/PythonProject2" add -A
-"/mnt/f/Git/cmd/git.exe" -C "D:/PythonProject/PythonProject2" commit -m "feat: ..."
-"/mnt/f/Git/cmd/git.exe" -C "D:/PythonProject/PythonProject2" push origin main
-```
-
-### 提交前自查（防止泄露隐私）
-
-```bash
-# 1) 确认没有 .env / 密钥 / 模型 / 依赖被暂存
-git diff --cached --name-only | grep -E '\.env$|\.key$|\.pem$|\.log$|node_modules|\.venv|agent/models' && echo '⚠️ 需要处理'
-# 2) 确认暂存内容没有真实 key 或本机绝对路径
-git grep -InE 'sk-[A-Za-z0-9]{20,}|D:\\\\PythonProject|/mnt/d/PythonProject' --cached && echo '⚠️ 需要处理'
-# 3) 看最终文件清单
-git diff --cached --name-only | wc -l
-```
-
-> `.gitignore` 已覆盖：`.env` 与所有 `.env.*`（保留 `.env.example`）、`agent/models/`、
-> `node_modules/`、`.venv/`、`frontend/dist/`、`*.log`、`tmp/`、简历样本 `resume_*.pdf`、`.idea/` 等；
-> 若新增了含密钥的文件，请同步更新 `.gitignore` 再提交。
-
----
-
-## 十二、相关文档
+## 十一、相关文档
 
 - [`deploy/RUNBOOK.md`](deploy/RUNBOOK.md) — 运维手册：端口表、启停重建、日志、故障排查、备份与卷清理
 - [`progress.md`](progress.md) — 进度日志与「落地级优化」总表（每项含实测数据、设计理由、验证方式）
